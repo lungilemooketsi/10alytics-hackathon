@@ -102,7 +102,7 @@ def simulate_revenue_shock(df, country, shock_pct=-20):
 
 def compare_risk_scores(df_original, df_shocked, model, feature_cols, country, year=None):
     """
-    Compare risk scores before and after shock.
+    Compare risk scores before and after shock with detailed metrics.
     
     Args:
         df_original: Original dataframe
@@ -111,6 +111,9 @@ def compare_risk_scores(df_original, df_shocked, model, feature_cols, country, y
         feature_cols: List of feature columns
         country: Country being analyzed
         year: Specific year to analyze (if None, use latest)
+    
+    Returns:
+        Dictionary with detailed stress test results
     """
     # Prepare features for both scenarios
     X_original = df_original[feature_cols].fillna(df_original[feature_cols].median())
@@ -134,11 +137,27 @@ def compare_risk_scores(df_original, df_shocked, model, feature_cols, country, y
     
     if len(df_orig_country) == 0:
         print(f"No data found for {country}")
-        return
+        return None
     
     orig_risk = df_orig_country['Risk_Score'].values[0]
     shocked_risk = df_shock_country['Risk_Score'].values[0]
     risk_increase = shocked_risk - orig_risk
+    
+    # Collect detailed metrics
+    results = {
+        'Country': country,
+        'Year': df_orig_country['Year'].values[0],
+        'Baseline_Risk_Score': orig_risk * 100,
+        'Post_Shock_Risk_Score': shocked_risk * 100,
+        'Risk_Increase_Percentage': risk_increase * 100,
+        'Risk_Multiplier': shocked_risk/orig_risk if orig_risk > 0 else 0,
+        'Baseline_Debt_to_GDP': df_orig_country.get('Debt_to_GDP', pd.Series([None])).values[0],
+        'Post_Shock_Debt_to_GDP': df_shock_country.get('Debt_to_GDP', pd.Series([None])).values[0],
+        'Baseline_Deficit_to_GDP': df_orig_country.get('Deficit_to_GDP', pd.Series([None])).values[0],
+        'Post_Shock_Deficit_to_GDP': df_shock_country.get('Deficit_to_GDP', pd.Series([None])).values[0],
+        'Baseline_Revenue': df_orig_country.get('Revenue', pd.Series([None])).values[0],
+        'Post_Shock_Revenue': df_shock_country.get('Revenue', pd.Series([None])).values[0],
+    }
     
     print(f"\n{'─'*70}")
     print(f"RISK ASSESSMENT FOR {country.upper()}")
@@ -147,7 +166,14 @@ def compare_risk_scores(df_original, df_shocked, model, feature_cols, country, y
     print(f"  Post-Shock Risk Score:    {shocked_risk:.1%}")
     print(f"  Risk Increase:            {risk_increase:+.1%}")
     print(f"  Risk Multiplier:          {shocked_risk/orig_risk:.2f}x")
+    print(f"\n  Fiscal Impact:")
+    if pd.notna(results['Baseline_Debt_to_GDP']):
+        print(f"    Debt/GDP:               {results['Baseline_Debt_to_GDP']:.2f}% → {results['Post_Shock_Debt_to_GDP']:.2f}%")
+    if pd.notna(results['Baseline_Deficit_to_GDP']):
+        print(f"    Deficit/GDP:            {results['Baseline_Deficit_to_GDP']:.2f}% → {results['Post_Shock_Deficit_to_GDP']:.2f}%")
     print(f"{'='*70}\n")
+    
+    return results
 
 
 def analyze_contagion(df):
@@ -290,8 +316,28 @@ def main():
     
     df_shocked = simulate_revenue_shock(df, target_country, shock_percentage)
     
-    # Compare risk scores
-    compare_risk_scores(df, df_shocked, model, feature_cols, target_country)
+    # Compare risk scores and collect detailed results
+    stress_test_results = compare_risk_scores(df, df_shocked, model, feature_cols, target_country)
+    
+    # Run multi-scenario stress tests
+    print("\n" + "="*70)
+    print("MULTI-SCENARIO STRESS TESTING")
+    print("="*70)
+    
+    scenarios = [
+        {'name': 'Moderate Shock', 'shock': -10},
+        {'name': 'Severe Shock', 'shock': -20},
+        {'name': 'Extreme Shock', 'shock': -30},
+    ]
+    
+    all_scenarios = []
+    for scenario in scenarios:
+        df_scenario = simulate_revenue_shock(df.copy(), target_country, scenario['shock'])
+        scenario_result = compare_risk_scores(df, df_scenario, model, feature_cols, target_country)
+        if scenario_result:
+            scenario_result['Scenario'] = scenario['name']
+            scenario_result['Shock_Percentage'] = scenario['shock']
+            all_scenarios.append(scenario_result)
     
     # Contagion Analysis
     correlation_matrix, high_corr_pairs = analyze_contagion(df)
@@ -299,27 +345,35 @@ def main():
     # Save results
     os.makedirs('outputs', exist_ok=True)
     
-    # Save stress test results
-    stress_results = pd.DataFrame({
-        'Country': [target_country],
-        'Shock_Type': ['Revenue Shock'],
-        'Shock_Magnitude': [f'{shock_percentage}%'],
-        'Analysis': ['Oil price crash simulation']
-    })
-    stress_results.to_csv('outputs/stress_test_results.csv', index=False)
+    # Save comprehensive stress test results
+    if all_scenarios:
+        stress_df = pd.DataFrame(all_scenarios)
+        stress_df.to_csv('outputs/stress_test_results.csv', index=False)
+        print(f"\nComprehensive stress test results saved to outputs/stress_test_results.csv")
     
-    # Save high correlation pairs
+    # Save expanded correlation analysis
     if high_corr_pairs:
         contagion_df = pd.DataFrame(high_corr_pairs, columns=['Country_1', 'Country_2', 'Correlation'])
+        # Add risk severity classification
+        contagion_df['Risk_Level'] = pd.cut(
+            contagion_df['Correlation'],
+            bins=[0.8, 0.85, 0.9, 0.95, 1.0],
+            labels=['High', 'Very High', 'Severe', 'Critical']
+        )
         contagion_df.to_csv('outputs/high_contagion_pairs.csv', index=False)
         print(f"High contagion pairs saved to outputs/high_contagion_pairs.csv")
     
+    # Save full correlation matrix
+    correlation_matrix.to_csv('outputs/full_debt_correlation_matrix.csv')
+    print(f"Full correlation matrix saved to outputs/full_debt_correlation_matrix.csv")
+    
     print("\n✅ Stress testing and contagion analysis complete!")
     print("\nGenerated outputs:")
-    print("  - outputs/stress_test_results.csv")
+    print("  - outputs/stress_test_results.csv (multi-scenario analysis)")
     print("  - outputs/contagion_correlation_heatmap.png")
+    print("  - outputs/full_debt_correlation_matrix.csv")
     if high_corr_pairs:
-        print("  - outputs/high_contagion_pairs.csv")
+        print("  - outputs/high_contagion_pairs.csv (with risk levels)")
 
 
 if __name__ == "__main__":

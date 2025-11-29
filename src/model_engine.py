@@ -188,7 +188,7 @@ def plot_feature_importance(model, feature_names, output_path):
 
 def predict_at_risk_countries(model, df, X, feature_names, metadata, year=2025):
     """
-    Identify top at-risk countries for a specific year.
+    Identify top at-risk countries for a specific year with detailed metrics.
     
     Args:
         model: Trained model
@@ -199,7 +199,7 @@ def predict_at_risk_countries(model, df, X, feature_names, metadata, year=2025):
         year: Year to predict for
     
     Returns:
-        DataFrame with top at-risk countries
+        DataFrame with comprehensive risk assessment
     """
     print(f"\n" + "="*60)
     print(f"TOP AT-RISK COUNTRIES FOR {year}")
@@ -207,8 +207,32 @@ def predict_at_risk_countries(model, df, X, feature_names, metadata, year=2025):
     
     # Get predictions for all data
     df_pred = metadata.copy()
-    df_pred['Risk_Score'] = model.predict_proba(X)[:, 1]
-    df_pred['Current_Debt_to_GDP'] = df['Debt_to_GDP'].values
+    df_pred['Risk_Score'] = model.predict_proba(X)[:, 1] * 100
+    df_pred['Crisis_Prediction'] = model.predict(X)
+    
+    # Add comprehensive metrics
+    if 'Debt_to_GDP' in df.columns:
+        df_pred['Current_Debt_to_GDP'] = df['Debt_to_GDP'].values
+    if 'Deficit_to_GDP' in df.columns:
+        df_pred['Deficit_to_GDP'] = df['Deficit_to_GDP'].values
+    if 'Tax_to_GDP' in df.columns:
+        df_pred['Tax_to_GDP'] = df['Tax_to_GDP'].values
+    if 'GDP Growth Rate' in df.columns:
+        df_pred['GDP_Growth_Rate'] = df['GDP Growth Rate'].values
+    if 'Inflation Rate ' in df.columns:
+        df_pred['Inflation_Rate'] = df['Inflation Rate '].values
+    if 'Unemployment Rate' in df.columns:
+        df_pred['Unemployment_Rate'] = df['Unemployment Rate'].values
+    
+    # Calculate 3-year trends where possible
+    df_pred['Debt_Trend'] = df_pred.groupby('Country')['Current_Debt_to_GDP'].diff(3)
+    
+    # Risk categories
+    df_pred['Risk_Category'] = pd.cut(
+        df_pred['Risk_Score'],
+        bins=[0, 20, 40, 60, 80, 100],
+        labels=['Low', 'Moderate', 'Elevated', 'High', 'Critical']
+    )
     
     # Filter for the specified year or latest available year
     if year in df_pred['Year'].values:
@@ -218,15 +242,22 @@ def predict_at_risk_countries(model, df, X, feature_names, metadata, year=2025):
         print(f"Year {year} not found. Using latest available year: {max_year}")
         df_year = df_pred[df_pred['Year'] == max_year]
     
-    # Sort by risk score
-    df_risk = df_year.sort_values('Risk_Score', ascending=False).head(5)
+    # Sort by risk score and get all countries
+    df_risk = df_year.sort_values('Risk_Score', ascending=False)
     
-    print(f"\nTop 5 Countries at Risk of Fiscal Crisis:\n")
-    print(f"{'Rank':<6}{'Country':<25}{'Risk Score':<15}{'Current Debt/GDP':<20}")
-    print("-" * 65)
+    print(f"\nDetailed Risk Assessment:\n")
+    print(f"{'Rank':<6}{'Country':<20}{'Risk':<8}{'Category':<12}{'Debt/GDP':<12}{'Deficit/GDP':<14}{'Growth%':<10}")
+    print("-" * 90)
     
     for idx, (i, row) in enumerate(df_risk.iterrows(), 1):
-        print(f"{idx:<6}{row['Country']:<25}{row['Risk_Score']:.1%}{' '*6}{row['Current_Debt_to_GDP']:.1f}%")
+        country = row['Country'][:18]
+        risk = f"{row['Risk_Score']:.1f}%"
+        category = str(row['Risk_Category'])
+        debt = f"{row.get('Current_Debt_to_GDP', 0):.1f}%" if pd.notna(row.get('Current_Debt_to_GDP')) else "N/A"
+        deficit = f"{row.get('Deficit_to_GDP', 0):.1f}%" if pd.notna(row.get('Deficit_to_GDP')) else "N/A"
+        growth = f"{row.get('GDP_Growth_Rate', 0):.1f}%" if pd.notna(row.get('GDP_Growth_Rate')) else "N/A"
+        
+        print(f"{idx:<6}{country:<20}{risk:<8}{category:<12}{debt:<12}{deficit:<14}{growth:<10}")
     
     print("="*60 + "\n")
     
@@ -275,10 +306,31 @@ def main():
     # Predict at-risk countries for 2025
     at_risk = predict_at_risk_countries(model, df_model, X, feature_names, metadata, year=2025)
     
-    # Save predictions
+    # Save comprehensive predictions
     predictions_path = "outputs/at_risk_countries_2025.csv"
     at_risk.to_csv(predictions_path, index=False)
     print(f"At-risk countries saved to {predictions_path}")
+    
+    # Save detailed model metrics
+    print("\nGenerating additional analytics...")
+    
+    # Save all predictions with probabilities
+    all_predictions = metadata.copy()
+    all_predictions['Risk_Score'] = model.predict_proba(X)[:, 1] * 100
+    all_predictions['Crisis_Prediction'] = model.predict(X)
+    all_predictions['Current_Debt_to_GDP'] = df_model['Debt_to_GDP'].values
+    all_predictions_path = "outputs/all_countries_risk_scores.csv"
+    all_predictions.to_csv(all_predictions_path, index=False)
+    print(f"Complete risk scores saved to {all_predictions_path}")
+    
+    # Save feature importance data
+    feature_importance_df = pd.DataFrame({
+        'Feature': feature_names,
+        'Importance': model.feature_importances_
+    }).sort_values('Importance', ascending=False)
+    feature_importance_path = "outputs/feature_importance_scores.csv"
+    feature_importance_df.to_csv(feature_importance_path, index=False)
+    print(f"Feature importance scores saved to {feature_importance_path}")
     
     print("\n✅ Model training and prediction complete!")
 

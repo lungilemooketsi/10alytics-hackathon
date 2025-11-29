@@ -1,2 +1,2 @@
-Country,Year,Risk_Score,Current_Debt_to_GDP
-Ghana,2025.0,0.01,13.64768115382468
+Country,Year,Risk_Score,Crisis_Prediction,Current_Debt_to_GDP,Deficit_to_GDP,Tax_to_GDP,GDP_Growth_Rate,Inflation_Rate,Unemployment_Rate,Debt_Trend,Risk_Category
+Ghana,2025.0,1.0,0,13.64768115382468,-1.5077590232133222,3.607432618424163,,23.48,,-30.946396570484403,Low
